@@ -1,0 +1,18 @@
+# Django va Python uchun asosiy narsalar
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite3
+db.sqlite3
+.env
+
+# VS Code fayllari
+.vscode/
+
+# Django statik va media fayllar
+staticfiles/
+media/
+
+# Migrations, logs va cache fayllar
+*.log
+migrations/
