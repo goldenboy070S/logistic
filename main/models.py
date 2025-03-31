@@ -54,6 +54,16 @@ class User(AbstractUser):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def clean(self):
+        """ Country code va phone number bir-biriga mosligini tekshiramiz """
+        if self.phone_number:
+            parsed_number = phonenumbers.parse(str(self.phone_number), None)
+            expected_country_code = self.country_code.replace('+', '')  # "+998" → "998"
+
+            if str(parsed_number.country_code) != expected_country_code:
+                raise ValidationError({'phone_number': f"Telefon raqam {self.get_country_code_display()} uchun noto‘g‘ri!"})
+
+
     def save(self, *args, **kwargs):
         if not self.username:
             self.username = self.first_name
