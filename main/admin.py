@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Order, Driver, Tracking, Vehicle, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, Owner_dispatcher
+from .models import User, Order, Driver, Tracking, Vehicle, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder
 from django.utils.translation import gettext_lazy as _
 # Register your models here.
 
@@ -61,7 +61,7 @@ class OwnerDispatcherAdmin(admin.ModelAdmin):
 class OrderAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "owner":
-            kwargs["queryset"] = Owner_dispatcher.objects.filter(role="owner", is_verified=True)  
+            kwargs["queryset"] = OwnerDispatcher.objects.filter(role="owner", is_verified=True)  
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
     
 
@@ -70,7 +70,7 @@ class DeliveryAdmin(admin.ModelAdmin):
         if db_field.name == "driver":
             kwargs["queryset"] = Driver.objects.filter(is_verified=True)  
         if db_field.name == "receiver":
-            kwargs["queryset"] = Owner_dispatcher.objects.filter(user__role="owner", is_verified=True)  # Bu yerda qidiriladigan foydalanuvchilarni o'qib ko’ring 
+            kwargs["queryset"] = OwnerDispatcher.objects.filter(user__role="owner", is_verified=True)  # Bu yerda qidiriladigan foydalanuvchilarni o'qib ko’ring 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
@@ -87,11 +87,21 @@ class CargoAdmin(admin.ModelAdmin):
             kwargs["queryset"] = User.objects.filter(role="owner", is_verified=True)  
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
-admin.site.register(Owner_dispatcher, OwnerDispatcherAdmin)
+
+class DispatcherOrderAdmin(admin.ModelAdmin):
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "assigned_driver":
+            kwargs["queryset"] = Driver.objects.filter(is_verified=True)  
+        if db_field.name == "dispatcher":
+            kwargs["queryset"] = OwnerDispatcher.objects.filter(user__role="dispatcher", is_verified=True)  # Bu yerda qidiriladigan foydalanuvchilarni o'qib ko’ring 
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+admin.site.register(OwnerDispatcher, OwnerDispatcherAdmin)
 admin.site.register(User, CustomUserAdmin)
 admin.site.register(Driver, DriverAdmin)
 admin.site.register(DeliveryConfirmation, DeliveryAdmin)    
 admin.site.register(Order, OrderAdmin)
+admin.site.register(DispatcherOrder, DispatcherOrderAdmin)
 admin.site.register(Tracking, TrackingAdmin)
 admin.site.register(Payment)
 admin.site.register(Vehicle)

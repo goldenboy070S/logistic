@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, Owner_dispatcher
+from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder
 from django.contrib.auth import authenticate
 
 
@@ -76,7 +76,7 @@ class Owner_dispatcherSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role__in=['owner', 'dispatcher']))
 
     class Meta:
-        model = Owner_dispatcher
+        model = OwnerDispatcher
         fields = ['id', 'user', 'passport_number','passport_image','is_verified', 'created_at', 'updated_at']
         depth = 1
         read_only_fields = ('is_verified',)
@@ -86,6 +86,14 @@ class AdminDriverVerificationSerializer(serializers.ModelSerializer):
     class Meta:
         model = Driver
         fields = ['is_verified']
+    
+class DispatcherOrderSerializer(serializers.ModelSerializer):
+    dispatcher = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role='dispatcher', is_verified=True))
+    assigned_driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
+    
+    class Meta:
+        model = DispatcherOrder
+        fields = '__all__'  
 
 
 class AdminOwnerDispatcherVerificationSerializer(serializers.ModelSerializer):
@@ -95,13 +103,14 @@ class AdminOwnerDispatcherVerificationSerializer(serializers.ModelSerializer):
 
 class DeliverySerializer(serializers.ModelSerializer):
     driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
-    receiver = serializers.PrimaryKeyRelatedField(queryset=Owner_dispatcher.objects.filter(user__role="owner", is_verified=True))
+    receiver = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role="owner", is_verified=True))
 
     class Meta:
         model = DeliveryConfirmation
         fields = ['order', 'driver', 'is_delivered_by_driver', 'delivered_at', 'receiver', 'is_received_by_receiver', 'received_at', 'dispatcher_notified']
 
 class VehicleSerializer(serializers.ModelSerializer):
+    driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
     
     class Meta:
         model = Vehicle
@@ -124,7 +133,7 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class CargoSerializer(serializers.ModelSerializer):
-    customer = serializers.PrimaryKeyRelatedField(queryset=Owner_dispatcher.objects.filter(user__role='owner'))
+    customer = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role='owner'))
     
     class Meta:
         model = Cargo
@@ -160,12 +169,13 @@ class AdministrativeUnitSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    owner = serializers.PrimaryKeyRelatedField(queryset=Owner_dispatcher.objects.filter(user__role='owner'))
+    owner = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role='owner'))
+
     class Meta:
         model = Order
         fields = [
             "id",
-            "customer",
+            "owner",
             "pickup_region",
             "pickup_location",
             "delivery_region",

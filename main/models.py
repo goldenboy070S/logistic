@@ -108,6 +108,17 @@ class AdministrativeUnit(models.Model):
         return f"{self.name.title()} ({self.region.name.title()} viloyati)"
 
 
+class OwnerDispatcher(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    passport_number = models.CharField(max_length=20, unique=True)  # Pasport raqami
+    passport_image = models.ImageField(upload_to='passports/', null=True, blank=True)
+    is_verified = models.BooleanField(default=False)  # Admin tomonidan tasdiqlanganmi?
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.first_name}, {self.user.last_name}, {self.user.role} Verified: {self.is_verified})"
+
 
 class Cargo(models.Model):
     WEIGHT_UNITS = [
@@ -125,7 +136,7 @@ class Cargo(models.Model):
     READNIESS_CHOICE = (('ready', "tayyor"),
                         ('not_ready', "tayyormas"))
     
-    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="cargos")
+    customer = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name="cargos")
 
     cargo_type = models.CharField(max_length=255) # yuk turi (qolda kiritiladi)
     weight = models.DecimalField(max_digits=10, decimal_places=2) #yuk ogirligi
@@ -133,14 +144,14 @@ class Cargo(models.Model):
     volume = models.DecimalField(max_digits=10, decimal_places=2) #yuk hajmi
     volume_unit = models.CharField(max_length=10, choices=VOLUME_UNITS, default='m³') # m³ kub
     special_requirements = models.TextField(null=True, blank=True) # qoshimcha (qolda kiritiladi)
-    readiness_choice = models.CharField(max_length=20, choices=READNIESS_CHOICE, null=True, blank=True) #yuk tayyorligi
+    readiness_choice = models.CharField(max_length=20, choices=READNIESS_CHOICE) #yuk tayyorligi
     readiness = models.TextField(null=True, blank=True) # yuk tayyorligi biror sabab (bahona)
     transport_type = models.CharField(max_length=155, help_text="transfort turi misol uchun: Fura") #transport turi (qolda kiritiladi)
     placement_method = models.CharField(max_length=155) # Yuk yuklash usuli
 
 
     def __str__(self):
-        return f" ({self.weight} {self.weight_unit})"
+        return f"cargo's owner {self.customer.user.first_name} ({self.readiness_choice}), "
 
 
 class Order(models.Model):
@@ -150,7 +161,7 @@ class Order(models.Model):
         ('completed', 'Yakunlandi'),
         ('cancelled', 'Bekor qilindi'),
     ]
-    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orders")
+    owner = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name="orders")
 
     pickup_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="pickup_orders")
     pickup_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="pickup_orders") # A nuqtadan
@@ -162,21 +173,15 @@ class Order(models.Model):
     unloading_time = models.DateTimeField(null=True, blank=True) # tushirish vaqti
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Order #{self.id} - {self.customer.username} )"
     
-
-class Owner_dispatcher(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    passport_number = models.CharField(max_length=20, unique=True)  # Pasport raqami
-    passport_image = models.ImageField(upload_to='passports/', null=True, blank=True)
-    is_verified = models.BooleanField(default=False)  # Admin tomonidan tasdiqlanganmi?
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    def save(self, *args, **kwargs):
+        if self.order_status == 'completed' and not self.delivery_region:
+            raise ValidationError("Buyurtma tugallanganda yetkazib berish manzili kiritilishi kerak!")
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.user.first_name}, {self.user.last_name} Verified: {self.is_verified})"
+        return f"Order #{self.id} - {self.owner.user.first_name} )"
+    
 
 
 class Driver(models.Model):
@@ -201,14 +206,14 @@ class DeliveryConfirmation(models.Model):
     is_delivered_by_driver = models.BooleanField(default=False)
     delivered_at = models.DateTimeField(null=True, blank=True)
 
-    receiver = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name="deliveries_received")
+    receiver = models.ForeignKey(OwnerDispatcher, on_delete=models.SET_NULL, null=True, blank=True, related_name="deliveries_received")
     is_received_by_receiver = models.BooleanField(default=False)
     received_at = models.DateTimeField(null=True, blank=True)
 
     dispatcher_notified = models.BooleanField(default=False)
 
     def check_delivery_status(self):
-        """Agar haydovchi va qabul qiluvchi tasdiqlasa, buyurtmani yakunlaymiz"""
+        """Agar haydovchi va qabul qiluvchi tasdiqlasa, buyurtmani yakunlanadi"""
         if self.is_delivered_by_driver and self.is_received_by_receiver:
             self.delivered_at = timezone.now()
             self.received_at = timezone.now()
@@ -223,13 +228,6 @@ class DeliveryConfirmation(models.Model):
             )
             
             self.notify_dispatcher()
-            self.save()
-
-    def notify_dispatcher(self):
-        """Dispatcherga bildirish yuborish"""
-        if not self.dispatcher_notified:
-            print(f"🚚 Buyurtma #{self.order.id} yetib keldi. Dispatcher xabardor qilindi.")
-            self.dispatcher_notified = True
             self.save()
 
 
@@ -250,11 +248,54 @@ class Tracking(models.Model):
     driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name='trackings')
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='trackings')
     current_location = models.CharField(max_length=255)
-    status = models.CharField(max_length=20, choices=[('pending', 'Pending'), ('in_transit', 'In Transit'), ('delivered', 'Delivered')], default='pending')
+    status = models.CharField(max_length=20, choices=[('pending', 'Kutilmoqda'),('in_transit', 'Yukda'),('delivered', 'Yetkazildi')], default='pending')
     last_updated = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if self.status == "delivered":
+            # Agar "delivered" holatiga o‘zgargan bo‘lsa, order.statusni yangilash
+            self.order.status = 'completed'
+            self.order.save()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Tracking {self.id}: {self.status} at {self.current_location}"
+    
+
+class DispatcherOrder(models.Model):
+    dispatcher = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name='managed_orders',)
+    order = models.OneToOneField(Order,  on_delete=models.CASCADE,  related_name='dispatcher_assignment')
+    assigned_driver = models.ForeignKey(Driver,  on_delete=models.SET_NULL,  null=True, blank=True,  related_name='assigned_orders')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def assign_driver(self, driver):
+        """Haydovchini buyurtmaga tayinlash"""
+        if driver.is_verified:  # Haydovchi tasdiqlangan bo‘lishi kerak
+            self.assigned_driver = driver
+            self.order.status = 'in_progress'
+            self.order.save()
+        else:
+            raise ValidationError(f"Haydovchi {driver} tasdiqlanmagan!")
+   
+    def mark_as_completed(self):
+        """Buyurtmani muvaffaqiyatli yakunlash"""
+        if self.assigned_driver:  # Faqat tayinlangan haydovchi bo‘lsa yakunlash
+            self.order.status = 'completed'
+            self.order.save()
+        else:
+            raise ValidationError("Buyurtmaga tayinlangan haydovchi mavjud emas!")
+
+    def cancel_order(self):
+        """Buyurtmani bekor qilish"""
+        if self.order.status not in ['completed', 'cancelled']:  # Faqat kutilayotgan yoki jarayonda bo‘lgan buyurtmalarni bekor qilish mumkin
+            self.order.status = 'cancelled'
+            self.order.save()
+        else:
+            raise ValidationError("Buyurtma allaqachon yakunlangan yoki bekor qilingan!")
+
+        def __str__(self):
+            return f"Dispetcher: {self.dispatcher} | Order #{self.order.id} | Status: {self.order.status}"
 
 
 class Payment(models.Model):
@@ -268,3 +309,5 @@ class Payment(models.Model):
     payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+

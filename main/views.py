@@ -65,14 +65,14 @@ class DriverViewSet(ModelViewSet):
 
 
 class OwnerDispatcherViewSet(ModelViewSet):
-    queryset = Owner_dispatcher.objects.all()
+    queryset = OwnerDispatcher.objects.all()
     serializer_class = Owner_dispatcherSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     @action(detail=True, methods=['patch'], permission_classes=[permissions.IsAdminUser])
     def verify(self, request, pk=None):
         """owner va dispatcherlarni tasdiqlash (faqat adminlar uchun)"""
-        user = get_object_or_404(Owner_dispatcher, pk=pk)
+        user = get_object_or_404(OwnerDispatcher, pk=pk)
         if user.is_verified:
              return Response({"message": "Bu foydalanuvchi allaqachon tasdiqlangan!"}, status=400)
         serializer = AdminOwnerDispatcherVerificationSerializer(user, data={'is_verified': True}, partial=True)
@@ -106,3 +106,7 @@ class DeliveryConfirmationViewSet(ModelViewSet):
     queryset = DeliveryConfirmation.objects.all()
     serializer_class = DeliverySerializer
 
+
+class DispatcherViewSet(ModelViewSet):
+    queryset = DispatcherOrder.objects.all()
+    serializer_class = DispatcherOrderSerializer
