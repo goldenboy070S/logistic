@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation
+from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, Owner_dispatcher
 from django.contrib.auth import authenticate
 
 
@@ -27,21 +27,24 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id','first_name', 'last_name', 'age', 'email', 'phone_number', 'role']
-
-    def validate_age(self, value):
-        if value < 17 or value > 100:
-            raise serializers.ValidationError("Yosh chegarasi 20 dan 100 gacha bo'lishi kerak.")
-        return value
+        fields = ['id','first_name', 'last_name', 'phone_number', 'role']
+        read_only_fields = ['role', 'phone_number']
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    password_confirmation = serializers.CharField(write_only=True, required=True)
+    password_confirmation = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
 
     class Meta:
         model = User
-        fields = ['username', 'phone_number', 'password', 'password_confirmation']
-        extra_kwargs = {'password': {'write_only': True}}
+        fields = ['country_code', 'phone_number', 'password', 'password_confirmation',
+                    #Shaxsiy malumotlar
+                  'first_name', 'last_name', 'role'  
+        ]
+        extra_kwargs = {
+            'password': {'write_only': True, 'style': {'input_type': 'password'}},
+            'password_confirmation': {'write_only': True, 'style': {'input_type': 'password'}},
+            'username': {'read_only': True},
+        }
 
     def validate(self, data):
         if data['password'] != data['password_confirmation']:
@@ -49,13 +52,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        validated_data.pop('password_confirmation')
+        validated_data.pop('password_confirmation', None)  # Tasdiqlash maydonini olib tashlaymiz
         password = validated_data.pop('password')
-        user = User(**validated_data)
-        user.set_password(password)
-        user.save()
-        return user
 
+        user = User(**validated_data)  # `username` avtomatik `first_name`dan olinadi
+        user.set_password(password)  # Parolni hash qilish
+        user.save()
+        
+        return user
 
 
 class DriverSerializer(serializers.ModelSerializer):
@@ -63,7 +67,17 @@ class DriverSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Driver
-        fields = ['id', 'carrier', 'license_number', 'license_expiry','license_image', 'experience_years', 'passport_number','passport_image', 'passport_expiry_date', 'is_verified', 'created_at', 'updated_at']
+        fields = ['id', 'carrier', 'license_number', 'license_image', 'passport_number','passport_image', 'is_verified', 'created_at', 'updated_at']
+        depth = 1
+        read_only_fields = ('is_verified',)
+
+
+class Owner_dispatcherSerializer(serializers.ModelSerializer):
+    user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role__in=['owner', 'dispatcher']))
+
+    class Meta:
+        model = Owner_dispatcher
+        fields = ['id', 'user', 'passport_number','passport_image','is_verified', 'created_at', 'updated_at']
         depth = 1
         read_only_fields = ('is_verified',)
     
@@ -74,8 +88,14 @@ class AdminDriverVerificationSerializer(serializers.ModelSerializer):
         fields = ['is_verified']
 
 
+class AdminOwnerDispatcherVerificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Driver
+        fields = ['is_verified']
+
 class DeliverySerializer(serializers.ModelSerializer):
-    driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=False))
+    driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
+    receiver = serializers.PrimaryKeyRelatedField(queryset=Owner_dispatcher.objects.filter(user__role="owner", is_verified=True))
 
     class Meta:
         model = DeliveryConfirmation
@@ -104,9 +124,24 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class CargoSerializer(serializers.ModelSerializer):
+    customer = serializers.PrimaryKeyRelatedField(queryset=Owner_dispatcher.objects.filter(user__role='owner'))
+    
     class Meta:
         model = Cargo
-        fields = '__all__'
+        fields = fields = [
+            "id",
+            "customer",
+            "cargo_type",
+            "weight",
+            "weight_unit",
+            "volume",
+            "volume_unit",
+            "special_requirements",
+            "readiness_choice",
+            "readiness",
+            "transport_type",
+            "placement_method",
+        ]
         depth = 1
 
     
@@ -117,6 +152,7 @@ class RegionSerializer(serializers.ModelSerializer):
 
 
 class AdministrativeUnitSerializer(serializers.ModelSerializer):
+    """Haydovchining hujjatlarini tastiqlaydi(prava, pasport)"""
     class Meta:
         model = AdministrativeUnit
         fields = '__all__'
@@ -124,7 +160,7 @@ class AdministrativeUnitSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    customer = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role='owner'))
+    owner = serializers.PrimaryKeyRelatedField(queryset=Owner_dispatcher.objects.filter(user__role='owner'))
     class Meta:
         model = Order
         fields = [

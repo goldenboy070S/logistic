@@ -1,7 +1,45 @@
+import phonenumbers
+
+
 from django.db import models
 from django.contrib.auth.models import AbstractUser, Group
 from time import timezone
+from phonenumber_field.modelfields import PhoneNumberField
+from django.core.validators import RegexValidator
+from phonenumbers import parse, is_valid_number, region_code_for_number
+from django.core.exceptions import ValidationError
 # Create your models here.
+
+PRIORITY_COUNTRIES = [
+    ('+1', 'AQSh'),
+    ('+44', 'Buyuk Britaniya'),
+    ('+33', 'Fransiya'),
+    ('+49', 'Germaniya'),
+    ('+81', 'Yaponiya'),
+    ('+86', 'Xitoy'),
+    ('+7', 'Rossiya'),
+    ('+82', 'Janubiy Koreya'),
+    ('+90', 'Turkiya'),
+    ('+998', 'O‘zbekiston'),  # Asosiy davlat
+    ('+7', 'Qozog‘iston'),
+    ('+996', 'Qirg‘iziston'),
+    ('+992', 'Tojikiston'),
+    ('+993', 'Turkmaniston'),
+    ('+374', 'Armaniston'),
+    ('+994', 'Ozarbayjon'),
+    ('+995', 'Gruziya'),
+    ('+971', 'BAA'),
+    ('+966', 'Saudiya Arabistoni'),]
+
+# 🔹 Qolgan barcha davlatlarni alfavit bo‘yicha tartiblaymiz
+OTHER_COUNTRIES = sorted(
+    [(f"+{code}", f"{phonenumbers.region_code_for_country_code(code)} (+{code})")
+     for code in phonenumbers.COUNTRY_CODE_TO_REGION_CODE.keys()
+     if f"+{code}" not in dict(PRIORITY_COUNTRIES)],  # Boshidagilarni yana qo‘shmaslik
+    key=lambda x: x[1]
+)
+
+COUNTRY_CHOICES = PRIORITY_COUNTRIES + OTHER_COUNTRIES
 
 
 class User(AbstractUser):
@@ -10,16 +48,19 @@ class User(AbstractUser):
         ('carrier', 'Yuk tashuvchi'),
         ('owner', 'Yuk egasi'),
     )
-    age = models.PositiveIntegerField(default=18)
-    phone_number = models.CharField(max_length=15, unique=True)
+    country_code = models.CharField(max_length=5, choices=COUNTRY_CHOICES, default='+998')
+    phone_number = PhoneNumberField(unique=True, region=None)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)  # Avval foydalanuvchini saqlaymiz
+        if not self.username:
+            self.username = self.first_name
 
-        # Role'ga mos keladigan guruhni topamiz
+        super().save(*args, **kwargs)  # Foydalanuvchini saqlaymiz
+
+        # Role'ga mos keladigan guruhni topamiz va qo‘shamiz
         role_group_map = {
             'dispatcher': 'dispatcher_group',
             'carrier': 'carrier_group',
@@ -28,10 +69,10 @@ class User(AbstractUser):
         group_name = role_group_map.get(self.role)
         if group_name:
             group, created = Group.objects.get_or_create(name=group_name)
-            self.groups.add(group)  # Foydalanuvchini guruhga qo‘shamiz
+            self.groups.add(group)
 
     def __str__(self):
-        return self.username
+        return f"{self.username}"
     
 
 class Region(models.Model):
@@ -59,13 +100,6 @@ class AdministrativeUnit(models.Model):
 
 
 class Cargo(models.Model):
-    CARGO_TYPES = [
-        ('general', 'General Cargo (Umumiy yuk)'),
-        ('fragile', 'Fragile Goods (Mo‘rt tovarlar)'),
-        ('perishable', 'Perishable Goods (Tez buziladigan mahsulotlar)'),
-        ('hazardous', 'Hazardous Materials (Xavfli materiallar)'),
-    ]
-
     WEIGHT_UNITS = [
         ("Lb", "Pound"),
         ('Kg', 'Kilogram'),
@@ -78,18 +112,25 @@ class Cargo(models.Model):
         ('L', 'Liter'),
     ]
 
-    cargo_type = models.CharField(max_length=20, choices=CARGO_TYPES)
-    weight = models.DecimalField(max_digits=10, decimal_places=2)
-    weight_unit = models.CharField(max_length=15, choices=WEIGHT_UNITS)
-    volume = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    volume_unit = models.CharField(max_length=10, choices=VOLUME_UNITS, default='m³')
-    special_requirements = models.TextField(null=True, blank=True)
-    transport_type = models.CharField(max_length=155)
-    placement_method = models.CharField(max_length=155, blank=True, null=True)
+    READNIESS_CHOICE = (('ready', "tayyor"),
+                        ('not_ready', "tayyormas"))
+    
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="cargos")
+
+    cargo_type = models.CharField(max_length=255) # yuk turi (qolda kiritiladi)
+    weight = models.DecimalField(max_digits=10, decimal_places=2) #yuk ogirligi
+    weight_unit = models.CharField(max_length=15, choices=WEIGHT_UNITS) # tonna, kg
+    volume = models.DecimalField(max_digits=10, decimal_places=2) #yuk hajmi
+    volume_unit = models.CharField(max_length=10, choices=VOLUME_UNITS, default='m³') # m³ kub
+    special_requirements = models.TextField(null=True, blank=True) # qoshimcha (qolda kiritiladi)
+    readiness_choice = models.CharField(max_length=20, choices=READNIESS_CHOICE, null=True, blank=True) #yuk tayyorligi
+    readiness = models.TextField(null=True, blank=True) # yuk tayyorligi biror sabab (bahona)
+    transport_type = models.CharField(max_length=155, help_text="transfort turi misol uchun: Fura") #transport turi (qolda kiritiladi)
+    placement_method = models.CharField(max_length=155) # Yuk yuklash usuli
 
 
     def __str__(self):
-        return f"{self.get_cargo_type_display()} ({self.weight} {self.weight_unit})"
+        return f" ({self.weight} {self.weight_unit})"
 
 
 class Order(models.Model):
@@ -99,12 +140,12 @@ class Order(models.Model):
         ('completed', 'Yakunlandi'),
         ('cancelled', 'Bekor qilindi'),
     ]
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orders")
 
-    customer = models.ForeignKey(User, on_delete=models.PROTECT, related_name="orders")
     pickup_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="pickup_orders")
-    pickup_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="pickup_orders")
+    pickup_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="pickup_orders") # A nuqtadan
     delivery_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="delivery_orders")
-    delivery_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="delivery_orders")
+    delivery_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="delivery_orders")# B nuqtaga
     order_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name="orders") 
     loading_time = models.DateTimeField(null=True, blank=True)   # Yuklash vaqti
@@ -113,29 +154,29 @@ class Order(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"Order #{self.id} - {self.customer.username} ({self.get_order_status_display()})"
+        return f"Order #{self.id} - {self.customer.username} )"
+    
 
+class Owner_dispatcher(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    passport_number = models.CharField(max_length=20, unique=True)  # Pasport raqami
+    passport_image = models.ImageField(upload_to='passports/', null=True, blank=True)
+    is_verified = models.BooleanField(default=False)  # Admin tomonidan tasdiqlanganmi?
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-
-
+    def __str__(self):
+        return f"{self.user.first_name}, {self.user.last_name} Verified: {self.is_verified})"
 
 
 class Driver(models.Model):
     carrier = models.OneToOneField(User, on_delete=models.CASCADE, related_name="driver_profile")
-    
     license_number = models.CharField(max_length=20, unique=True)  # Haydovchilik guvohnomasi raqami
-    license_expiry = models.DateField()  # Guvohnomaning amal qilish muddati
     license_image = models.ImageField(upload_to='licenses/', null=True, blank=True)
-
-    experience_years = models.PositiveIntegerField(default=3)  # Tajriba yillari
-
     passport_number = models.CharField(max_length=20, unique=True)  # Pasport raqami
-    passport_issue_date = models.DateField()  # Pasport berilgan sana
-    passport_expiry_date = models.DateField(null=True, blank=True)  # Pasport muddati (agar bo‘lsa)
     passport_image = models.ImageField(upload_to='passports/', null=True, blank=True)
 
     is_verified = models.BooleanField(default=False)  # Admin tomonidan tasdiqlanganmi?
-    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -210,7 +251,7 @@ class Payment(models.Model):
     PAYMENT_CHOICES = (
     ("card", "Bank Karta"),
     ("e_wallet", "Elektron Hamyon"),
-    ("crypto", "Kriptovalyuta"),
+    ("cash money", "naxt pul"),
 )
     order = models.ForeignKey(Order, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
