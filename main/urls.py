@@ -1,4 +1,5 @@
 from rest_framework.routers import DefaultRouter
+from django.urls import path, include
 from .views import *
 router = DefaultRouter()
 
@@ -11,8 +12,11 @@ router.register('orders', OrderViewSet)
 router.register('trackings', TrackingViewSet)
 router.register('payments', PaymentViewSet)
 router.register('dispatcherOrder', DispatcherViewSet)
-router.register('regions', RegionViewSet, basename='regions')
 router.register('deliveries', DeliveryConfirmationViewSet)
+router.register('regions', RegionViewSet, basename='regions')
+router.register('administreviteUnits', AdministraviteUnitViewSet)
 
-
-urlpatterns = router.urls
+urlpatterns = [
+    path('register/', UserViewSet.as_view({'post': 'create'}), name='register'),  
+    path('', include(router.urls)),
+]

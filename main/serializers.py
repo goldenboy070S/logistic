@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder
+from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder, DriverAdvertisement
 from django.contrib.auth import authenticate
 
 
@@ -71,7 +71,7 @@ class DriverSerializer(serializers.ModelSerializer):
         depth = 1
         read_only_fields = ('is_verified',)
 
-
+ 
 class Owner_dispatcherSerializer(serializers.ModelSerializer):
     user = serializers.PrimaryKeyRelatedField(queryset=User.objects.filter(role__in=['owner', 'dispatcher']))
 
@@ -97,6 +97,7 @@ class DispatcherOrderSerializer(serializers.ModelSerializer):
 
 
 class AdminOwnerDispatcherVerificationSerializer(serializers.ModelSerializer):
+    """Haydovchining hujjatlarini tastiqlaydi(prava, pasport)"""
     class Meta:
         model = Driver
         fields = ['is_verified']
@@ -107,7 +108,9 @@ class DeliverySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DeliveryConfirmation
-        fields = ['order', 'driver', 'is_delivered_by_driver', 'delivered_at', 'receiver', 'is_received_by_receiver', 'received_at', 'dispatcher_notified']
+        fields = ['id', 'order', 'driver', 'is_delivered_by_driver', 'delivered_at', 'receiver', 'is_received_by_receiver', 'received_at', 'dispatcher_notified']
+        read_only_fields = ['id']
+
 
 class VehicleSerializer(serializers.ModelSerializer):
     driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
@@ -117,12 +120,26 @@ class VehicleSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
 
+class DriverAdvertisementSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DriverAdvertisement
+        fields = "__all__"
+
+    def validate_vehicle(self, value):
+        """Haydovchi faqat o‘z mashinasiga e’lon bera oladi"""
+        request = self.context["request"]
+        if value.driver.user != request.user:
+            raise serializers.ValidationError("Siz faqat o‘z mashinangizga e’lon bera olasiz!")
+        return value
+    
+
 class TrackingSerializer(serializers.ModelSerializer):
     driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
 
     class Meta:
         model = Tracking
-        fields = ['order', 'driver', 'vehicle', 'current_location', 'status', 'last_updated']
+        fields = ['id', 'order', 'driver', 'vehicle', 'current_location', 'status', 'last_updated']
+        read_only_fields = ['id']
 
     
 class PaymentSerializer(serializers.ModelSerializer):
@@ -161,7 +178,6 @@ class RegionSerializer(serializers.ModelSerializer):
 
 
 class AdministrativeUnitSerializer(serializers.ModelSerializer):
-    """Haydovchining hujjatlarini tastiqlaydi(prava, pasport)"""
     class Meta:
         model = AdministrativeUnit
         fields = '__all__'

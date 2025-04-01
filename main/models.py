@@ -10,26 +10,27 @@ from phonenumbers import parse, is_valid_number, region_code_for_number
 from django.core.exceptions import ValidationError
 # Create your models here.
 
+
 PRIORITY_COUNTRIES = [
-    ('+1', 'AQSh'),
-    ('+44', 'Buyuk Britaniya'),
-    ('+33', 'Fransiya'),
-    ('+49', 'Germaniya'),
-    ('+81', 'Yaponiya'),
-    ('+86', 'Xitoy'),
-    ('+7', 'Rossiya'),
-    ('+82', 'Janubiy Koreya'),
-    ('+90', 'Turkiya'),
-    ('+998', 'O‘zbekiston'),  # Asosiy davlat
-    ('+7', 'Qozog‘iston'),
-    ('+996', 'Qirg‘iziston'),
-    ('+992', 'Tojikiston'),
-    ('+993', 'Turkmaniston'),
-    ('+374', 'Armaniston'),
-    ('+994', 'Ozarbayjon'),
-    ('+995', 'Gruziya'),
-    ('+971', 'BAA'),
-    ('+966', 'Saudiya Arabistoni'),]
+    ('+1', 'AQSh (+1)'),
+    ('+44', 'Buyuk Britaniya(+44)'),
+    ('+33', 'Fransiya(+33)'),
+    ('+49', 'Germaniya(+49)'),
+    ('+81', 'Yaponiya(+81)'),
+    ('+86', 'Xitoy(+86)'),
+    ('+7', 'Rossiya(+7)'),
+    ('+82', 'Janubiy Koreya(+82)'),
+    ('+90', 'Turkiya(+90)'),
+    ('+998', 'O‘zbekiston(+998)'),  # Asosiy davlat
+    ('+7', 'Qozog‘iston(+7)'),
+    ('+996', 'Qirg‘iziston(+996)'),
+    ('+992', 'Tojikiston(+992)'),
+    ('+993', 'Turkmaniston(+993)'),
+    ('+374', 'Armaniston(+374)'),
+    ('+994', 'Ozarbayjon(+994)'),
+    ('+995', 'Gruziya(+995)'),
+    ('+971', 'BAA(+971)'),
+    ('+966', 'Saudiya Arabistoni(+966)'),]
 
 # 🔹 Qolgan barcha davlatlarni alfavit bo‘yicha tartiblaymiz
 OTHER_COUNTRIES = sorted(
@@ -53,6 +54,9 @@ class User(AbstractUser):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def get_full_name(self):
+        return f"{self.first_name} {self.last_name}"
 
     def clean(self):
         """ Country code va phone number bir-biriga mosligini tekshiramiz """
@@ -117,14 +121,12 @@ class OwnerDispatcher(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.user.first_name}, {self.user.last_name}, {self.user.role} Verified: {self.is_verified})"
+        return f"{self.user.get_full_name()} (Verified: {self.is_verified})"
 
 
 class Cargo(models.Model):
     WEIGHT_UNITS = [
-        ("Lb", "Pound"),
         ('Kg', 'Kilogram'),
-        ('G', 'Gram'),
         ('T', 'Tons'),
     ]
 
@@ -149,9 +151,8 @@ class Cargo(models.Model):
     transport_type = models.CharField(max_length=155, help_text="transfort turi misol uchun: Fura") #transport turi (qolda kiritiladi)
     placement_method = models.CharField(max_length=155) # Yuk yuklash usuli
 
-
     def __str__(self):
-        return f"cargo's owner {self.customer.user.first_name} ({self.readiness_choice}), "
+        return f"cargo's owner {self.customer.user.get_full_name()} ({self.readiness_choice}) "
 
 
 class Order(models.Model):
@@ -180,7 +181,7 @@ class Order(models.Model):
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Order #{self.id} - {self.owner.user.first_name} )"
+        return f"Order #{self.id} - {self.owner.user.get_full_name()} "
     
 
 
@@ -196,7 +197,7 @@ class Driver(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return f"{self.carrier} - {self.license_number} (Verified: {self.is_verified})"
+        return f"{self.carrier.get_full_name()} - {self.license_number} (Verified: {self.is_verified})"
 
 
 class DeliveryConfirmation(models.Model):
@@ -214,19 +215,16 @@ class DeliveryConfirmation(models.Model):
 
     def check_delivery_status(self):
         """Agar haydovchi va qabul qiluvchi tasdiqlasa, buyurtmani yakunlanadi"""
-        if self.is_delivered_by_driver and self.is_received_by_receiver:
+        if self.is_delivered_by_driver and self.is_received_by_receiver == True:
             self.delivered_at = timezone.now()
             self.received_at = timezone.now()
             self.order.order_status = "completed"
             self.order.save()
-            
-            # ✅ Yuk yetkazib berildi, Tracking log qo‘shamiz
-            Tracking.objects.create(
-                order=self.order,
-                status="delivered",
-                location=self.order.delivery_location.name  # Manzilni yozamiz
-            )
-            
+            tracking = Tracking.objects.filter(order=self.order).first()
+            if tracking:
+                tracking.status = "delivered"
+                tracking.save()
+
             self.notify_dispatcher()
             self.save()
 
@@ -243,6 +241,41 @@ class Vehicle(models.Model):
         return f"{self.vehicle} - {self.plate_number}"
 
 
+class DriverAdvertisement(models.Model):
+    WEIGHT_UNITS = [
+        ('Kg', 'Kilogram'),
+        ('Tonna', 'Tons'),
+    ]
+    driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name="advertisements")
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="advertisements")
+    available_from = models.DateTimeField()  # Qachondan yuk qabul qiladi
+    available_to = models.DateTimeField()  # Qachongacha yuk qabul qiladi
+    from_location = models.CharField(max_length=255)  # Jo‘nash joyi
+    to_location = models.CharField(max_length=255)  # Yetkazish joyi
+    weight = models.DecimalField(max_digits=10, decimal_places=2) #yuk ogirligi
+    weight_unit = models.CharField(max_length=15, choices=WEIGHT_UNITS) # tonna, kg
+    volume = models.DecimalField(max_digits=10, decimal_places=2) #yuk hajmi
+    price_per_kg = models.DecimalField(max_digits=10, decimal_places=2)  # 1 kg uchun narx
+    is_active = models.BooleanField(default=True)  # Faol yoki yo‘qligi
+    created_at = models.DateTimeField(auto_now_add=True)  
+
+    def __str__(self):
+        return f"{self.driver.carrier.get_full_name()} ({self.from_location} ➝ {self.to_location})"
+
+    def convert_to_kg(self):
+        """Og‘irlikni kg ga o‘zgartirish."""
+        conversion_factors = {
+            "Kg": 1,         # 1 kg = 1 kg
+            "T": 1000        # 1 tonna = 1000 kg
+        }
+        return self.weight * conversion_factors.get(self.weight_unit, 1)  # Agar nomalum birlik bo'lsa, shunchaki weight qaytadi
+
+    def calculate_total_price(self):
+        """Jami narxni hisoblash."""
+        weight_in_kg = self.convert_to_kg()  # Og‘irlikni kg ga o‘zgartiramiz
+        return weight_in_kg * self.price_per_kg  # Narxni hisoblaymiz
+
+
 class Tracking(models.Model):
     order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='tracking')
     driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name='trackings')
@@ -253,9 +286,10 @@ class Tracking(models.Model):
 
     def save(self, *args, **kwargs):
         if self.status == "delivered":
-            # Agar "delivered" holatiga o‘zgargan bo‘lsa, order.statusni yangilash
-            self.order.status = 'completed'
-            self.order.save()
+            self.order.order_status = 'completed'
+        elif self.status == "in_transit":
+            self.order.order_status = 'in_progress'
+        self.order.save()
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -273,7 +307,7 @@ class DispatcherOrder(models.Model):
         """Haydovchini buyurtmaga tayinlash"""
         if driver.is_verified:  # Haydovchi tasdiqlangan bo‘lishi kerak
             self.assigned_driver = driver
-            self.order.status = 'in_progress'
+            self.order.order_status = 'in_progress'
             self.order.save()
         else:
             raise ValidationError(f"Haydovchi {driver} tasdiqlanmagan!")
@@ -281,21 +315,10 @@ class DispatcherOrder(models.Model):
     def mark_as_completed(self):
         """Buyurtmani muvaffaqiyatli yakunlash"""
         if self.assigned_driver:  # Faqat tayinlangan haydovchi bo‘lsa yakunlash
-            self.order.status = 'completed'
+            self.order.order_status = 'completed'
             self.order.save()
         else:
             raise ValidationError("Buyurtmaga tayinlangan haydovchi mavjud emas!")
-
-    def cancel_order(self):
-        """Buyurtmani bekor qilish"""
-        if self.order.status not in ['completed', 'cancelled']:  # Faqat kutilayotgan yoki jarayonda bo‘lgan buyurtmalarni bekor qilish mumkin
-            self.order.status = 'cancelled'
-            self.order.save()
-        else:
-            raise ValidationError("Buyurtma allaqachon yakunlangan yoki bekor qilingan!")
-
-        def __str__(self):
-            return f"Dispetcher: {self.dispatcher} | Order #{self.order.id} | Status: {self.order.status}"
 
 
 class Payment(models.Model):

@@ -110,3 +110,13 @@ class DeliveryConfirmationViewSet(ModelViewSet):
 class DispatcherViewSet(ModelViewSet):
     queryset = DispatcherOrder.objects.all()
     serializer_class = DispatcherOrderSerializer
+
+
+class DriverAdvertisementViewSet(ModelViewSet):
+    queryset = DriverAdvertisement.objects.all()
+    serializer_class = DriverAdvertisementSerializer
+
+
+class AdministraviteUnitViewSet(ModelViewSet):
+    queryset = AdministrativeUnit.objects.all()
+    serializer_class = AdministrativeUnitSerializer 
