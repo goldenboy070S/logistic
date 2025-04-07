@@ -8,7 +8,7 @@ router.register('drivers', DriverViewSet)
 router.register('owner-dispatcher', OwnerDispatcherViewSet)
 router.register('vehicles', VehicleViewSet)
 router.register('cargos',CargoViewSet)
-router.register('orders', OrderViewSet)
+router.register('bids', BidViewSet, basename='bids')
 router.register('trackings', TrackingViewSet)
 router.register('payments', PaymentViewSet)
 router.register('dispatcherOrder', DispatcherViewSet)
@@ -19,4 +19,5 @@ router.register('administreviteUnits', AdministraviteUnitViewSet)
 urlpatterns = [
     path('register/', UserViewSet.as_view({'post': 'create'}), name='register'),  
     path('', include(router.urls)),
+    path("bids/<int:pk>/update-status/", BidViewSet.as_view({'patch': 'update_status'}), name="bid-update-status")
 ]

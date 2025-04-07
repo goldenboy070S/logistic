@@ -1,8 +1,10 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from rest_framework.reverse import reverse
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import User, Order, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder, DriverAdvertisement
+from .models import User, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder, Bid
 from django.contrib.auth import authenticate
+from .utils import generate_auth_code
 
 
 class CustomTokenObtainSerializer(TokenObtainPairSerializer):
@@ -52,14 +54,19 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        validated_data.pop('password_confirmation', None)  # Tasdiqlash maydonini olib tashlaymiz
-        password = validated_data.pop('password')
+            validated_data.pop('password_confirmation')  
+            password = validated_data.pop('password')
 
-        user = User(**validated_data)  # `username` avtomatik `first_name`dan olinadi
-        user.set_password(password)  # Parolni hash qilish
-        user.save()
-        
-        return user
+            user = User(**validated_data)
+            user.set_password(password)  
+            user.is_active = False  # Ro‘yxatdan o‘tgan foydalanuvchi avval faollashmagan bo‘lishi kerak
+            user.save()
+            return user
+
+
+class VerifyCodeSerializer(serializers.Serializer):
+    phone_number = serializers.CharField()
+    auth_code = serializers.CharField(max_length=6)
 
 
 class DriverSerializer(serializers.ModelSerializer):
@@ -67,7 +74,7 @@ class DriverSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Driver
-        fields = ['id', 'carrier', 'license_number', 'license_image', 'passport_number','passport_image', 'is_verified', 'created_at', 'updated_at']
+        fields = '__all__'
         depth = 1
         read_only_fields = ('is_verified',)
 
@@ -77,8 +84,7 @@ class Owner_dispatcherSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OwnerDispatcher
-        fields = ['id', 'user', 'passport_number','passport_image','is_verified', 'created_at', 'updated_at']
-        depth = 1
+        fields = '__all__'
         read_only_fields = ('is_verified',)
     
 
@@ -87,6 +93,7 @@ class AdminDriverVerificationSerializer(serializers.ModelSerializer):
         model = Driver
         fields = ['is_verified']
     
+
 class DispatcherOrderSerializer(serializers.ModelSerializer):
     dispatcher = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role='dispatcher', is_verified=True))
     assigned_driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
@@ -108,7 +115,7 @@ class DeliverySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DeliveryConfirmation
-        fields = ['id', 'order', 'driver', 'is_delivered_by_driver', 'delivered_at', 'receiver', 'is_received_by_receiver', 'received_at', 'dispatcher_notified']
+        fields = '__all__'
         read_only_fields = ['id']
 
 
@@ -120,17 +127,20 @@ class VehicleSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
 
-class DriverAdvertisementSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = DriverAdvertisement
-        fields = "__all__"
+class BidSerializer(serializers.ModelSerializer):
+    driver = serializers.PrimaryKeyRelatedField(queryset=Driver.objects.filter(is_verified=True))
 
-    def validate_vehicle(self, value):
-        """Haydovchi faqat o‘z mashinasiga e’lon bera oladi"""
-        request = self.context["request"]
-        if value.driver.user != request.user:
-            raise serializers.ValidationError("Siz faqat o‘z mashinangizga e’lon bera olasiz!")
-        return value
+    class Meta:
+        model = Bid
+        fields = ['driver', 'cargo', 'propose', 'proposed_price']
+
+
+class BidStatusUpdateSerializer(serializers.ModelSerializer):
+    status = serializers.ChoiceField(choices=Bid.STATUS_CHOICES)
+
+    class Meta:
+        model = Bid
+        fields = ["status"]
     
 
 class TrackingSerializer(serializers.ModelSerializer):
@@ -138,7 +148,7 @@ class TrackingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tracking
-        fields = ['id', 'order', 'driver', 'vehicle', 'current_location', 'status', 'last_updated']
+        fields = ['id', 'cargo', 'driver', 'vehicle', 'current_location', 'status', 'last_updated']
         read_only_fields = ['id']
 
     
@@ -150,60 +160,32 @@ class PaymentSerializer(serializers.ModelSerializer):
 
 
 class CargoSerializer(serializers.ModelSerializer):
+    bids = serializers.SerializerMethodField()  # Barcha bid-larni olish uchun
     customer = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role='owner'))
     
     class Meta:
         model = Cargo
-        fields = fields = [
-            "id",
-            "customer",
-            "cargo_type",
-            "weight",
-            "weight_unit",
-            "volume",
-            "volume_unit",
-            "special_requirements",
-            "readiness_choice",
-            "readiness",
-            "transport_type",
-            "placement_method",
-        ]
-        depth = 1
-
-    
-class RegionSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Region
-        fields = '__all__'
-
-
-class AdministrativeUnitSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = AdministrativeUnit
-        fields = '__all__'
-        depth = 1
-
-
-class OrderSerializer(serializers.ModelSerializer):
-    owner = serializers.PrimaryKeyRelatedField(queryset=OwnerDispatcher.objects.filter(user__role='owner'))
-
-    class Meta:
-        model = Order
         fields = [
             "id",
-            "owner",
+            "customer",
             "pickup_region",
             "pickup_location",
             "delivery_region",
             "delivery_location",
-            "order_status",
-            "cargo",
+            "cargo_type",
+            "cargo_status",
             'loading_time', 
-            'unloading_time',
-            "created_at",
-            "updated_at",
+            "weight",
+            "weight_unit",
+            "volume",
+            "readiness_choice",
+            "readiness",
+            "transport_type",
+            "placement_method",
+            "special_requirements",
+            'bids'
         ]
-    
+
     def validate(self, data):
         """Pickup location va delivery location noto‘g‘ri viloyatga tegishli emasligini tekshiramiz"""
         if data["pickup_location"].region_id != data["pickup_region"].id:
@@ -218,4 +200,30 @@ class OrderSerializer(serializers.ModelSerializer):
 
         return data
 
-    depth = 1
+    def get_bids(self, obj):
+        """Har bir Bid uchun 'update-status' URL yaratamiz"""
+        request = self.context.get("request")
+        bids = obj.bids.all()  # Ushbu yukga tegishli barcha bid-larni olamiz
+        return [
+            {
+                "bid_id": bid.id,
+                "propose": bid.propose,
+                "status": bid.status,
+                "proposed_price": bid.proposed_price,
+                "update_url": reverse("bid-update-status", kwargs={"pk": bid.id}, request=request),
+            }
+            for bid in bids
+        ]
+
+    
+class RegionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Region
+        fields = '__all__'
+
+
+class AdministrativeUnitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AdministrativeUnit
+        fields = '__all__'
+        depth = 1

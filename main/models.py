@@ -1,4 +1,5 @@
 import phonenumbers
+import random
 
 
 from django.db import models
@@ -7,11 +8,13 @@ from time import timezone
 from phonenumber_field.modelfields import PhoneNumberField
 from django.core.validators import RegexValidator
 from phonenumbers import parse, is_valid_number, region_code_for_number
-from django.core.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError
+from .utils import generate_auth_code
 # Create your models here.
 
 
 PRIORITY_COUNTRIES = [
+    ('+998', 'O‘zbekiston(+998)'),  # Asosiy davlat
     ('+1', 'AQSh (+1)'),
     ('+44', 'Buyuk Britaniya(+44)'),
     ('+33', 'Fransiya(+33)'),
@@ -21,7 +24,6 @@ PRIORITY_COUNTRIES = [
     ('+7', 'Rossiya(+7)'),
     ('+82', 'Janubiy Koreya(+82)'),
     ('+90', 'Turkiya(+90)'),
-    ('+998', 'O‘zbekiston(+998)'),  # Asosiy davlat
     ('+7', 'Qozog‘iston(+7)'),
     ('+996', 'Qirg‘iziston(+996)'),
     ('+992', 'Tojikiston(+992)'),
@@ -52,6 +54,8 @@ class User(AbstractUser):
     country_code = models.CharField(max_length=5, choices=COUNTRY_CHOICES, default='+998')
     phone_number = PhoneNumberField(unique=True, region=None)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    auth_code = models.CharField(max_length=6, blank=True, null=True)
+    is_active = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -69,6 +73,8 @@ class User(AbstractUser):
 
 
     def save(self, *args, **kwargs):
+        if not self.auth_code:  # Agar auth_code hali bo'sh bo'lsa, uni yaratish
+            self.auth_code = generate_auth_code() 
         if not self.username:
             self.username = self.first_name
 
@@ -125,6 +131,17 @@ class OwnerDispatcher(models.Model):
 
 
 class Cargo(models.Model):
+    PAYMENT_CHOICES = (
+    ("card", "Bank Karta"),
+    ("e_wallet", "Elektron Hamyon"),
+    ("cash money", "naxt pul"),
+)
+    STATUS_CHOICES = [
+        ('pending', 'Kutilmoqda'),
+        ('in_progress', 'Jarayonda'),
+        ('completed', 'Yakunlandi'),
+        ('cancelled', 'Bekor qilindi'),
+    ]
     WEIGHT_UNITS = [
         ('Kg', 'Kilogram'),
         ('T', 'Tons'),
@@ -134,54 +151,37 @@ class Cargo(models.Model):
         ('m³', 'Cubic Meter'),
         ('L', 'Liter'),
     ]
-
     READNIESS_CHOICE = (('ready', "tayyor"),
                         ('not_ready', "tayyormas"))
     
     customer = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name="cargos")
 
+    pickup_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="pickup_cargos")
+    pickup_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="pickup_cargos") # A nuqtadan
+    delivery_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="delivery_cargos")
+    delivery_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="delivery_cargos")# B nuqtaga
     cargo_type = models.CharField(max_length=255) # yuk turi (qolda kiritiladi)
+    loading_time = models.DateTimeField(null=True, blank=True)   # Yuklash vaqti
+    cargo_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     weight = models.DecimalField(max_digits=10, decimal_places=2) #yuk ogirligi
     weight_unit = models.CharField(max_length=15, choices=WEIGHT_UNITS) # tonna, kg
     volume = models.DecimalField(max_digits=10, decimal_places=2) #yuk hajmi
-    volume_unit = models.CharField(max_length=10, choices=VOLUME_UNITS, default='m³') # m³ kub
-    special_requirements = models.TextField(null=True, blank=True) # qoshimcha (qolda kiritiladi)
     readiness_choice = models.CharField(max_length=20, choices=READNIESS_CHOICE) #yuk tayyorligi
     readiness = models.TextField(null=True, blank=True) # yuk tayyorligi biror sabab (bahona)
-    transport_type = models.CharField(max_length=155, help_text="transfort turi misol uchun: Fura") #transport turi (qolda kiritiladi)
     placement_method = models.CharField(max_length=155) # Yuk yuklash usuli
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES)
+    transport_type = models.CharField(max_length=155, help_text="transfort turi misol uchun: Fura") #transport turi (qolda kiritiladi)
+    special_requirements = models.TextField(null=True, blank=True) # qoshimcha (qolda kiritiladi)
 
-    def __str__(self):
-        return f"cargo's owner {self.customer.user.get_full_name()} ({self.readiness_choice}) "
-
-
-class Order(models.Model):
-    STATUS_CHOICES = [
-        ('pending', 'Kutilmoqda'),
-        ('in_progress', 'Jarayonda'),
-        ('completed', 'Yakunlandi'),
-        ('cancelled', 'Bekor qilindi'),
-    ]
-    owner = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name="orders")
-
-    pickup_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="pickup_orders")
-    pickup_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="pickup_orders") # A nuqtadan
-    delivery_region = models.ForeignKey(Region, on_delete=models.PROTECT, related_name="delivery_orders")
-    delivery_location = models.ForeignKey(AdministrativeUnit, on_delete=models.PROTECT, related_name="delivery_orders")# B nuqtaga
-    order_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name="orders") 
-    loading_time = models.DateTimeField(null=True, blank=True)   # Yuklash vaqti
-    unloading_time = models.DateTimeField(null=True, blank=True) # tushirish vaqti
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
     def save(self, *args, **kwargs):
-        if self.order_status == 'completed' and not self.delivery_region:
+        if self.readiness_choice == 'not_ready':
+            self.cargo_status = 'pending'     
+        if self.cargo_status == 'completed' and not self.delivery_region:
             raise ValidationError("Buyurtma tugallanganda yetkazib berish manzili kiritilishi kerak!")
         super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Order #{self.id} - {self.owner.user.get_full_name()} "
+        return f"cargo's owner {self.customer.user.get_full_name()} ({self.readiness_choice}) "
     
 
 
@@ -201,7 +201,7 @@ class Driver(models.Model):
 
 
 class DeliveryConfirmation(models.Model):
-    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name="confirmation")
+    cargo = models.OneToOneField(Cargo, on_delete=models.CASCADE, related_name="confirmation")
 
     driver = models.ForeignKey(Driver, on_delete=models.SET_NULL, null=True, blank=True, related_name="deliveries_made")
     is_delivered_by_driver = models.BooleanField(default=False)
@@ -218,9 +218,9 @@ class DeliveryConfirmation(models.Model):
         if self.is_delivered_by_driver and self.is_received_by_receiver == True:
             self.delivered_at = timezone.now()
             self.received_at = timezone.now()
-            self.order.order_status = "completed"
-            self.order.save()
-            tracking = Tracking.objects.filter(order=self.order).first()
+            self.cargo.cargo_status = "completed"
+            self.cargo.save()
+            tracking = Tracking.objects.filter(cargo=self.cargo).first()
             if tracking:
                 tracking.status = "delivered"
                 tracking.save()
@@ -236,48 +236,30 @@ class Vehicle(models.Model):
     plate_number = models.CharField(max_length=15, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+  
     def __str__(self):
         return f"{self.vehicle} - {self.plate_number}"
 
 
-class DriverAdvertisement(models.Model):
-    WEIGHT_UNITS = [
-        ('Kg', 'Kilogram'),
-        ('Tonna', 'Tons'),
+class Bid(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Kutilmoqda'),
+        ('accepted', 'Qabul qilindi'),
+        ('rejected', 'Rad etildi'),
     ]
-    driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name="advertisements")
-    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="advertisements")
-    available_from = models.DateTimeField()  # Qachondan yuk qabul qiladi
-    available_to = models.DateTimeField()  # Qachongacha yuk qabul qiladi
-    from_location = models.CharField(max_length=255)  # Jo‘nash joyi
-    to_location = models.CharField(max_length=255)  # Yetkazish joyi
-    weight = models.DecimalField(max_digits=10, decimal_places=2) #yuk ogirligi
-    weight_unit = models.CharField(max_length=15, choices=WEIGHT_UNITS) # tonna, kg
-    volume = models.DecimalField(max_digits=10, decimal_places=2) #yuk hajmi
-    price_per_kg = models.DecimalField(max_digits=10, decimal_places=2)  # 1 kg uchun narx
-    is_active = models.BooleanField(default=True)  # Faol yoki yo‘qligi
-    created_at = models.DateTimeField(auto_now_add=True)  
+    driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name="bids")
+    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE, related_name="bids")
+    propose = models.TextField()
+    proposed_price = models.DecimalField(max_digits=10, decimal_places=2)  # Haydovchi narx taklif qiladi
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.driver.carrier.get_full_name()} ({self.from_location} ➝ {self.to_location})"
-
-    def convert_to_kg(self):
-        """Og‘irlikni kg ga o‘zgartirish."""
-        conversion_factors = {
-            "Kg": 1,         # 1 kg = 1 kg
-            "T": 1000        # 1 tonna = 1000 kg
-        }
-        return self.weight * conversion_factors.get(self.weight_unit, 1)  # Agar nomalum birlik bo'lsa, shunchaki weight qaytadi
-
-    def calculate_total_price(self):
-        """Jami narxni hisoblash."""
-        weight_in_kg = self.convert_to_kg()  # Og‘irlikni kg ga o‘zgartiramiz
-        return weight_in_kg * self.price_per_kg  # Narxni hisoblaymiz
+        return f"Bid by {self.driver.carrier.get_full_name()} for {self.cargo}"
 
 
 class Tracking(models.Model):
-    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='tracking')
+    cargo = models.OneToOneField(Cargo, on_delete=models.CASCADE, related_name='tracking')
     driver = models.ForeignKey(Driver, on_delete=models.CASCADE, related_name='trackings')
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name='trackings')
     current_location = models.CharField(max_length=255)
@@ -286,10 +268,10 @@ class Tracking(models.Model):
 
     def save(self, *args, **kwargs):
         if self.status == "delivered":
-            self.order.order_status = 'completed'
+            self.cargo.cargo_status = 'completed'
         elif self.status == "in_transit":
-            self.order.order_status = 'in_progress'
-        self.order.save()
+            self.cargo.cargo_status = 'in_progress'
+        self.cargo.save()
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -297,9 +279,9 @@ class Tracking(models.Model):
     
 
 class DispatcherOrder(models.Model):
-    dispatcher = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name='managed_orders',)
-    order = models.OneToOneField(Order,  on_delete=models.CASCADE,  related_name='dispatcher_assignment')
-    assigned_driver = models.ForeignKey(Driver,  on_delete=models.SET_NULL,  null=True, blank=True,  related_name='assigned_orders')
+    dispatcher = models.ForeignKey(OwnerDispatcher, on_delete=models.CASCADE, related_name='managed_cargos',)
+    cargo = models.OneToOneField(Cargo,  on_delete=models.CASCADE,  related_name='dispatcher_assignment')
+    assigned_driver = models.ForeignKey(Driver,  on_delete=models.SET_NULL,  null=True, blank=True,  related_name='assigned_cargos')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -307,29 +289,23 @@ class DispatcherOrder(models.Model):
         """Haydovchini buyurtmaga tayinlash"""
         if driver.is_verified:  # Haydovchi tasdiqlangan bo‘lishi kerak
             self.assigned_driver = driver
-            self.order.order_status = 'in_progress'
-            self.order.save()
+            self.cargo.cargo_status = 'in_progress'
+            self.cargo.save()
         else:
             raise ValidationError(f"Haydovchi {driver} tasdiqlanmagan!")
    
     def mark_as_completed(self):
         """Buyurtmani muvaffaqiyatli yakunlash"""
         if self.assigned_driver:  # Faqat tayinlangan haydovchi bo‘lsa yakunlash
-            self.order.order_status = 'completed'
-            self.order.save()
+            self.cargo.cargo_status = 'completed'
+            self.cargo.save()
         else:
             raise ValidationError("Buyurtmaga tayinlangan haydovchi mavjud emas!")
 
 
 class Payment(models.Model):
-    PAYMENT_CHOICES = (
-    ("card", "Bank Karta"),
-    ("e_wallet", "Elektron Hamyon"),
-    ("cash money", "naxt pul"),
-)
-    order = models.ForeignKey(Order, on_delete=models.CASCADE)
+    cargo = models.ForeignKey(Cargo, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    payment_method = models.CharField(max_length=20, choices=PAYMENT_CHOICES)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User, Order, Driver, Tracking, Vehicle, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder, DriverAdvertisement
+from .models import User, Driver, Tracking, Vehicle, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder, Bid
 from django.utils.translation import gettext_lazy as _
 # Register your models here.
 
@@ -58,13 +58,6 @@ class OwnerDispatcherAdmin(admin.ModelAdmin):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
-class OrderAdmin(admin.ModelAdmin):
-    def formfield_for_foreignkey(self, db_field, request, **kwargs):
-        if db_field.name == "owner":
-            kwargs["queryset"] = OwnerDispatcher.objects.filter(role="owner", is_verified=True)  
-        return super().formfield_for_foreignkey(db_field, request, **kwargs)
-    
-
 class DeliveryAdmin(admin.ModelAdmin):
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == "driver":
@@ -86,6 +79,13 @@ class CargoAdmin(admin.ModelAdmin):
         if db_field.name == "customer":
             kwargs["queryset"] = User.objects.filter(role="owner", is_verified=True)  
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+    
+
+class BidAdmin(admin.ModelAdmin):
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "driver":
+            kwargs["queryset"] = Driver.objects.filter(is_verified=True)  
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 class DispatcherOrderAdmin(admin.ModelAdmin):
@@ -100,7 +100,6 @@ admin.site.register(OwnerDispatcher, OwnerDispatcherAdmin)
 admin.site.register(User, CustomUserAdmin)
 admin.site.register(Driver, DriverAdmin)
 admin.site.register(DeliveryConfirmation, DeliveryAdmin)    
-admin.site.register(Order, OrderAdmin)
 admin.site.register(DispatcherOrder, DispatcherOrderAdmin)
 admin.site.register(Tracking, TrackingAdmin)
 admin.site.register(Payment)
