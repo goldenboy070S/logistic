@@ -10,39 +10,7 @@ from django.core.validators import RegexValidator
 from phonenumbers import parse, is_valid_number, region_code_for_number
 from rest_framework.exceptions import ValidationError
 from .utils import generate_auth_code
-# Create your models here.
-
-
-PRIORITY_COUNTRIES = [
-    ('+998', 'O‘zbekiston(+998)'),  # Asosiy davlat
-    ('+1', 'AQSh (+1)'),
-    ('+44', 'Buyuk Britaniya(+44)'),
-    ('+33', 'Fransiya(+33)'),
-    ('+49', 'Germaniya(+49)'),
-    ('+81', 'Yaponiya(+81)'),
-    ('+86', 'Xitoy(+86)'),
-    ('+7', 'Rossiya(+7)'),
-    ('+82', 'Janubiy Koreya(+82)'),
-    ('+90', 'Turkiya(+90)'),
-    ('+7', 'Qozog‘iston(+7)'),
-    ('+996', 'Qirg‘iziston(+996)'),
-    ('+992', 'Tojikiston(+992)'),
-    ('+993', 'Turkmaniston(+993)'),
-    ('+374', 'Armaniston(+374)'),
-    ('+994', 'Ozarbayjon(+994)'),
-    ('+995', 'Gruziya(+995)'),
-    ('+971', 'BAA(+971)'),
-    ('+966', 'Saudiya Arabistoni(+966)'),]
-
-# 🔹 Qolgan barcha davlatlarni alfavit bo‘yicha tartiblaymiz
-OTHER_COUNTRIES = sorted(
-    [(f"+{code}", f"{phonenumbers.region_code_for_country_code(code)} (+{code})")
-     for code in phonenumbers.COUNTRY_CODE_TO_REGION_CODE.keys()
-     if f"+{code}" not in dict(PRIORITY_COUNTRIES)],  # Boshidagilarni yana qo‘shmaslik
-    key=lambda x: x[1]
-)
-
-COUNTRY_CHOICES = PRIORITY_COUNTRIES + OTHER_COUNTRIES
+from phonenumbers import parse, NumberParseException, is_valid_number
 
 
 class User(AbstractUser):
@@ -51,8 +19,7 @@ class User(AbstractUser):
         ('carrier', 'Yuk tashuvchi'),
         ('owner', 'Yuk egasi'),
     )
-    country_code = models.CharField(max_length=5, choices=COUNTRY_CHOICES, default='+998')
-    phone_number = PhoneNumberField(unique=True, region=None)
+    phone_number = PhoneNumberField(unique=True, region='UZ')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     auth_code = models.CharField(max_length=6, blank=True, null=True)
     is_active = models.BooleanField(default=False)
@@ -61,22 +28,14 @@ class User(AbstractUser):
 
     def get_full_name(self):
         return f"{self.first_name} {self.last_name}"
-
+    
     def clean(self):
-        """ Country code va phone number bir-biriga mosligini tekshiramiz """
-        if self.phone_number:
-            parsed_number = phonenumbers.parse(str(self.phone_number), None)
-            expected_country_code = self.country_code.replace('+', '')  # "+998" → "998"
-
-            if str(parsed_number.country_code) != expected_country_code:
-                raise ValidationError({'phone_number': f"Telefon raqam {self.get_country_code_display()} uchun noto‘g‘ri!"})
-
+        from utils import validate_uz_phone_number
+        validate_uz_phone_number(self.phone_number)
 
     def save(self, *args, **kwargs):
         if not self.auth_code:  # Agar auth_code hali bo'sh bo'lsa, uni yaratish
             self.auth_code = generate_auth_code() 
-        if not self.username:
-            self.username = self.first_name
 
         super().save(*args, **kwargs)  # Foydalanuvchini saqlaymiz
 

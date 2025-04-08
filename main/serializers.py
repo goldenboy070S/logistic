@@ -4,7 +4,7 @@ from rest_framework.reverse import reverse
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from .models import User, Driver, Vehicle, Tracking, Payment, Cargo, Region, AdministrativeUnit, DeliveryConfirmation, OwnerDispatcher, DispatcherOrder, Bid
 from django.contrib.auth import authenticate
-from .utils import generate_auth_code
+from phonenumber_field.serializerfields import PhoneNumberField
 
 
 class CustomTokenObtainSerializer(TokenObtainPairSerializer):
@@ -25,7 +25,6 @@ class CustomTokenObtainSerializer(TokenObtainPairSerializer):
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
-    phone_number = serializers.CharField(required=True)
 
     class Meta:
         model = User
@@ -33,20 +32,41 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         read_only_fields = ['role', 'phone_number']
 
 
+class PhoneNumberField(serializers.CharField):
+    def to_internal_value(self, data):
+        data = super().to_internal_value(data)
+        from .utils import validate_priority_phone_number
+        validate_priority_phone_number(data)
+        return data
+
+
 class UserCreateSerializer(serializers.ModelSerializer):
+    phone_number = PhoneNumberField()
     password_confirmation = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
 
     class Meta:
         model = User
-        fields = ['country_code', 'phone_number', 'password', 'password_confirmation',
+        fields = ['username', 'phone_number', 'password', 'password_confirmation',
                     #Shaxsiy malumotlar
                   'first_name', 'last_name', 'role'  
         ]
         extra_kwargs = {
             'password': {'write_only': True, 'style': {'input_type': 'password'}},
             'password_confirmation': {'write_only': True, 'style': {'input_type': 'password'}},
-            'username': {'read_only': True},
         }
+
+    def validate_phone_number(self, value):
+        normalized = value.replace(' ', '').replace('-', '')  # `normalize_phone` o‘rniga
+
+        # Telefon raqamini priority davlatlar uchun validatsiya qilish
+        from .utils import validate_priority_phone_number
+        validate_priority_phone_number(normalized)
+
+        # Foydalanuvchi allaqachon ro‘yxatdan o‘tganmi?
+        if User.objects.filter(phone_number=normalized).exists():
+            raise serializers.ValidationError("Bu raqam allaqachon ro‘yxatdan o‘tgan.")
+        
+        return normalized
 
     def validate(self, data):
         if data['password'] != data['password_confirmation']:
@@ -54,14 +74,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-            validated_data.pop('password_confirmation')  
-            password = validated_data.pop('password')
+        validated_data.pop('password_confirmation')  
+        password = validated_data.pop('password')
 
-            user = User(**validated_data)
-            user.set_password(password)  
-            user.is_active = False  # Ro‘yxatdan o‘tgan foydalanuvchi avval faollashmagan bo‘lishi kerak
-            user.save()
-            return user
+        user = User(**validated_data)
+        user.set_password(password)  
+        user.is_active = False  # Ro‘yxatdan o‘tgan foydalanuvchi avval faollashmagan bo‘lishi kerak
+        user.save()
+        return user
 
 
 class VerifyCodeSerializer(serializers.Serializer):

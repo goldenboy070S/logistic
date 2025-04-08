@@ -78,7 +78,7 @@ class UserViewSet(ModelViewSet):
         return Response({"message": "Foydalanuvchi muvaffaqiyatli faollashtirildi!"}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], permission_classes=[])
-    def last_code(self, request):
+    def test(self, request):   
         """Test rejimi: telefon raqam bo‘yicha auth_code ni ko‘rsatish"""
         phone_number = request.data.get("phone_number")
 
