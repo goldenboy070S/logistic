@@ -20,6 +20,7 @@ class User(AbstractUser):
         ('owner', 'Yuk egasi'),
     )
     phone_number = PhoneNumberField(unique=True, region='UZ')
+    temp_phone_number = models.CharField(max_length=25, blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES)
     auth_code = models.CharField(max_length=6, blank=True, null=True)
     is_active = models.BooleanField(default=False)
@@ -29,9 +30,9 @@ class User(AbstractUser):
     def get_full_name(self):
         return f"{self.first_name} {self.last_name}"
     
-    def clean(self):
-        from utils import validate_uz_phone_number
-        validate_uz_phone_number(self.phone_number)
+    # def clean(self):
+    #     from utils import validate_uz_phone_number
+    #     validate_uz_phone_number(self.phone_number)
 
     def save(self, *args, **kwargs):
         if not self.auth_code:  # Agar auth_code hali bo'sh bo'lsa, uni yaratish

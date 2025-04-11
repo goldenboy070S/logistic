@@ -40,6 +40,32 @@ class PhoneNumberField(serializers.CharField):
         return data
 
 
+class ChangePhoneRequestSerializer(serializers.Serializer):
+    new_phone_number = PhoneNumberField()
+
+    def validate_new_phone_number(self, value):
+        normalized = value.replace(' ', '').replace('-', '')
+        from .utils import validate_priority_phone_number
+        validate_priority_phone_number(normalized)
+
+        if User.objects.filter(phone_number=normalized).exists():
+            raise serializers.ValidationError("Bu raqam allaqachon ro'yxatdan o'tgan.")
+
+        return normalized
+    
+
+class ConfirmPhoneChangeSerializer(serializers.Serializer):
+    auth_code = serializers.CharField()
+
+    def validate(self, data):
+        user = self.context['request'].user
+        if not user.temp_phone_number:
+            raise serializers.ValidationError("Avval telefon raqam o'zgartirishni boshlang.")
+        if user.auth_code != data['auth_code']:
+            raise serializers.ValidationError("Tasdiqlash kodi noto‘g‘ri.")
+        return data
+
+
 class UserCreateSerializer(serializers.ModelSerializer):
     phone_number = PhoneNumberField()
     password_confirmation = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
@@ -82,6 +108,18 @@ class UserCreateSerializer(serializers.ModelSerializer):
         user.is_active = False  # Ro‘yxatdan o‘tgan foydalanuvchi avval faollashmagan bo‘lishi kerak
         user.save()
         return user
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    phone_number = serializers.CharField()
+    auth_code = serializers.CharField()
+    new_password = serializers.CharField(write_only=True)
+    new_password_confirmation = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        if data['new_password'] != data['new_password_confirmation']:
+            raise serializers.ValidationError({"password": "Parollar mos emas!"})
+        return data
 
 
 class VerifyCodeSerializer(serializers.Serializer):

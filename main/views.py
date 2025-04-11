@@ -28,8 +28,12 @@ class UserViewSet(ModelViewSet):
             return UserCreateSerializer
         elif self.action == 'verify_code':
             return VerifyCodeSerializer
-        elif self.action in ['resend_verification_code', 'last_code']:
-            return serializers.Serializer  # oddiy serializer talab qilinmasa
+        elif self.action in ['resend_verification_code', 'test', 'send_reset_code', 'reset_password']:
+            return serializers.Serializer
+        elif self.action == 'change_phone_request':
+            return ChangePhoneRequestSerializer
+        elif self.action == 'confirm_phone_change':
+            return ConfirmPhoneChangeSerializer
         return UserUpdateSerializer
     
     @action(detail=False, methods=['post'], permission_classes=[])
@@ -76,6 +80,72 @@ class UserViewSet(ModelViewSet):
         user.save()
 
         return Response({"message": "Foydalanuvchi muvaffaqiyatli faollashtirildi!"}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['post'], permission_classes=[])
+    def send_reset_code(self, request):
+        phone_number = request.data.get("phone_number")
+        try:
+            user = User.objects.get(phone_number=phone_number)
+        except User.DoesNotExist:
+            return Response({"error": "Bu raqam bilan foydalanuvchi topilmadi!"}, status=404)
+
+        user.auth_code = generate_auth_code()
+        user.save()
+
+        print(f"[TEST MODE] Parol tiklash kodi: {user.auth_code}")
+        return Response({"message": "Parolni tiklash uchun kod yuborildi!"}, status=200)
+    
+    @action(detail=False, methods=['post'], permission_classes=[])
+    def reset_password(self, request):
+        serializer = ResetPasswordSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        try:
+            user = User.objects.get(
+                phone_number=data['phone_number'],
+                auth_code=data['auth_code']
+            )
+        except User.DoesNotExist:
+            return Response({"error": "Kod noto‘g‘ri yoki foydalanuvchi topilmadi!"}, status=400)
+
+        user.set_password(data['new_password'])
+        user.auth_code = None
+        user.save()
+        return Response({"message": "Parol muvaffaqiyatli o‘zgartirildi!"})
+
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def change_phone_request(self, request):
+        serializer = ChangePhoneRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_phone = serializer.validated_data['new_phone_number']
+        user = request.user
+        user.auth_code = generate_auth_code()
+        user.temp_phone_number = new_phone  # Bu fieldni User modelga qo‘shamiz
+        user.save()
+
+        print(f"TEST MODE: {new_phone} raqamga yuborilgan kod: {user.auth_code}")
+        
+        return Response({
+            "message": "Yangi telefon raqamga tasdiqlash kodi yuborildi.",
+            "test_auth_code": user.auth_code  # test rejimi uchun
+        }, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['post'], permission_classes=[IsAuthenticated])
+    def confirm_phone_change(self, request):
+        serializer = ConfirmPhoneChangeSerializer(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        user.phone_number = user.temp_phone_number
+        user.temp_phone_number = None
+        user.auth_code = None
+        user.save()
+
+        return Response({
+            "message": "Telefon raqam muvaffaqiyatli o‘zgartirildi."
+        }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], permission_classes=[])
     def test(self, request):   
